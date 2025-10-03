@@ -1,0 +1,17 @@
+# .gitignore
+
+# Entorno virtual
+.venv/
+.env
+
+# Archivos de Python y caché
+*.pyc
+__pycache__/
+
+# Base de datos local
+fichajes.db
+
+# Archivos de compilación
+build/
+dist/
+*.spec

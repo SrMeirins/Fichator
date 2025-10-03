@@ -1,0 +1,194 @@
+/* gui/estilos.qss */
+
+/* Colores */
+/* Fondo principal: #2c3e50 (Deep Slate) */
+/* Fondo secundario: #34495e (Dark Navy) - Color de las tarjetas */
+/* Color de acento (Principal): #1abc9c (Turquesa/Verde Mar) */
+/* Verde Entrada: #2ecc71 */
+/* Azul Pausa: #3498db */
+/* Rojo Salida: #e74c3c */
+
+QWidget {
+    background-color: #2c3e50; 
+    color: #ecf0f1; 
+    font-size: 10pt; /* REDUCCIÓN DE TAMAÑO DE FUENTE GLOBAL */
+    font-family: 'Open Sans', 'Segoe UI', Arial, sans-serif; 
+}
+
+/* --- TABS --- */
+QTabWidget::pane {
+    border: 1px solid #34495e;
+    background-color: #34495e;
+}
+QTabBar::tab {
+    background: #34495e;
+    color: #ecf0f1;
+    padding: 8px 12px; /* Reducción de padding */
+    border-top-left-radius: 5px;
+    border-top-right-radius: 5px;
+    border: none;
+    margin-right: 2px;
+}
+QTabBar::tab:selected {
+    background: #1abc9c;
+    color: #2c3e50;
+    font-weight: bold;
+}
+
+/* --- Botones Genéricos (Estilo Base) --- */
+QPushButton {
+    background-color: #34495e; /* Fondo oscuro neutro */
+    color: #ecf0f1; 
+    border: 1px solid #7f8c8d;
+    padding: 8px; /* Reducción de padding */
+    border-radius: 5px;
+    min-height: 25px; /* Reducción de altura mínima */
+    font-size: 12pt; /* Reducción de fuente de botones */
+    font-weight: bold;
+}
+
+QPushButton:hover {
+    background-color: #395066; 
+    border: 1px solid #ecf0f1;
+}
+
+QPushButton:pressed {
+    background-color: #2c3e50;
+    padding-top: 9px; 
+    padding-bottom: 7px;
+}
+
+/* ESTILO GRIS PARA DESACTIVADOS (Tiene prioridad sobre los colores funcionales) */
+QPushButton:disabled {
+    background-color: #2c3e50; 
+    color: #7f8c8d; 
+    border: 1px solid #5a6a78; 
+}
+
+/* --- ESTILOS DE BOTONES FUNCIONALES (Activados) --- */
+QPushButton#EntradaBtn:enabled {
+    background-color: #2ecc71; 
+    color: #2c3e50;
+    border: 1px solid #27ae60;
+}
+QPushButton#EntradaBtn:enabled:hover {
+    background-color: #27ae60;
+}
+
+QPushButton#IrAComerBtn:enabled {
+    background-color: #3498db; 
+    color: #ecf0f1;
+    border: 1px solid #2980b9;
+}
+QPushButton#IrAComerBtn:enabled:hover {
+    background-color: #2980b9;
+}
+
+QPushButton#FinJornadaBtn:enabled, QPushButton#SalidaComidaBtn:enabled { 
+    background-color: #e74c3c; 
+    color: #ecf0f1;
+    border: 1px solid #c0392b;
+}
+QPushButton#FinJornadaBtn:enabled:hover, QPushButton#SalidaComidaBtn:enabled:hover {
+    background-color: #c0392b;
+}
+
+
+/* --- Entrada de Datos y Desplegables --- */
+QDateEdit, QTimeEdit, QComboBox, QLineEdit {
+    background-color: #34495e; 
+    color: #ecf0f1;
+    border: 1px solid #1abc9c;
+    padding: 6px; /* Reducción de padding */
+    border-radius: 5px;
+    selection-background-color: #2980b9;
+}
+
+/* --- Sección de Fichaje Rápido (Tarjetas - QFrame) --- */
+QFrame#InfoCard {
+    background-color: #34495e; 
+    border: 1px solid #1abc9c;
+    border-radius: 8px; 
+    padding: 10px; /* Reducción de padding */
+    margin: 5px;
+}
+
+/* --- Etiquetas de Resumen Diario (Horas, Fichajes) --- */
+QLabel#LabelHoras {
+    color: #1abc9c; 
+    font-size: 24pt; /* Reducción de fuente de horas */
+    font-weight: bold;
+}
+
+QLabel#LabelFecha {
+    color: #ecf0f1;
+}
+
+/* --- Etiquetas de Historial del Día (Mejora de legibilidad) --- */
+QLabel#LabelHistorialContent {
+    font-size: 11pt; /* Reducción de fuente */
+    color: #bdc3c7;
+    padding: 5px;
+}
+
+/* --- Barra de Progreso Semanal --- */
+QProgressBar {
+    border: 2px solid #1abc9c;
+    border-radius: 10px;
+    text-align: center;
+    color: #ecf0f1; 
+    background-color: #34495e; 
+    height: 25px; /* Reducción de altura */
+    font-size: 12pt;
+    font-weight: bold;
+}
+
+QProgressBar::chunk {
+    background-color: #2ecc71; 
+    border-radius: 8px;
+    margin: 2px; 
+}
+
+/* --- Tablas --- */
+QTableWidget {
+    background-color: #34495e; 
+    gridline-color: #2c3e50; 
+    border: 1px solid #1abc9c; 
+    selection-background-color: #2980b9; 
+    selection-color: white;
+    alternate-background-color: #395066; 
+    font-size: 10pt; /* Importante para que los datos sean más pequeños */
+}
+
+QHeaderView::section {
+    background-color: #34495e;
+    color: #ecf0f1;
+    padding: 8px 5px; /* Reducción de padding */
+    border: 1px solid #2c3e50;
+    font-weight: bold;
+    font-size: 11pt; /* Reducción de fuente de cabecera */
+}
+
+QTableWidget::item {
+    padding: 8px 5px; /* Reducción de padding */
+}
+
+QTableWidget::item:selected {
+    background-color: #2980b9;
+    color: #ecf0f1;
+}
+
+/* --- GroupBox para el historial --- */
+QGroupBox { 
+    border: 1px solid #1abc9c; 
+    border-radius: 5px; 
+    margin-top: 25px; 
+} 
+QGroupBox::title { 
+    subcontrol-origin: margin; 
+    subcontrol-position: top center; 
+    padding: 0 10px; 
+    color: #1abc9c; 
+    font-size: 12pt; 
+    font-weight: bold;
+}
