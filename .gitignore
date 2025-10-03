@@ -1,17 +1,28 @@
-# .gitignore
-
 # Entorno virtual
+venv/
 .venv/
 .env
 
-# Archivos de Python y caché
+# Archivos de Python
 *.pyc
 __pycache__/
 
-# Base de datos local
+# Base de datos local (¡NO subir datos personales!)
 fichajes.db
 
-# Archivos de compilación
+# Paquetización (PyInstaller)
 build/
 dist/
 *.spec
+ControlFichajes/  # Si usas --onedir
+
+# Paquetización (setuptools/stdeb/general)
+deb_dist/
+*.deb
+*.dsc
+*.tar.gz
+*.orig.tar.gz
+*.tar.xz
+*.buildinfo
+*.changes
+*.egg-info/

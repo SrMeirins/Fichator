@@ -1,0 +1,3 @@
+# debian/install
+fichaje-unificado.desktop usr/share/applications
+data/icons/fichaje-unificado.png usr/share/icons/hicolor/256x256/apps
