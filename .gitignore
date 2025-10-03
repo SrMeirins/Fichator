@@ -10,11 +10,12 @@ __pycache__/
 # Base de datos local (¡NO subir datos personales!)
 fichajes.db
 
-# Paquetización (PyInstaller)
+# Paquetización (PyInstaller y Ejecutables)
 build/
 dist/
 *.spec
-ControlFichajes/  # Si usas --onedir
+ControlFichajes/ # Carpeta de salida si usas --onedir
+*.exe # El ejecutable final
 
 # Paquetización (setuptools/stdeb/general)
 deb_dist/
