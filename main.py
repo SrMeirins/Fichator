@@ -1,8 +1,13 @@
 import sys
 from PySide6.QtWidgets import QApplication, QWidget, QVBoxLayout, QMessageBox
-from gui.app_unificada import AppUnificada # <--- NUEVO NOMBRE
+from gui.app_unificada import AppUnificada # Asume que esta es la ruta correcta
 from models.fichaje import init_db 
 import os 
+from pathlib import Path
+
+# --- RUTA CORREGIDA PARA ENTORNO DE DESARROLLO ---
+# Esto funciona cuando se ejecuta 'python3 main.py' desde la raíz del proyecto.
+BASE_DIR = Path(__file__).resolve().parent
 
 class FichajeApp(QWidget):
     def __init__(self):
@@ -25,19 +30,29 @@ class FichajeApp(QWidget):
         self.app_unificada = AppUnificada()
         layout.addWidget(self.app_unificada)
         
-        # Al iniciar, la ventana principal será maximizada (o un buen tamaño inicial)
+        # Al iniciar, la ventana principal será maximizada
         self.resize(1000, 700)
-        self.showMaximized() # <--- MEJORA: Maximizar al inicio
+        self.showMaximized()
+
+
+def main():
+    """Función de entrada principal para ejecución directa."""
+    app = QApplication(sys.argv)
+    
+    # Lógica de carga de estilos desde la carpeta 'gui'
+    qss_path = BASE_DIR / "gui" / "estilos.qss"
+    
+    if qss_path.exists():
+        try:
+            with open(qss_path, "r") as f:
+                app.setStyleSheet(f.read())
+        except Exception as e:
+            # Mensaje de advertencia en caso de fallo al cargar el estilo
+            print(f"Advertencia: No se pudo cargar estilos.qss. Error: {e}", file=sys.stderr)
+            
+    window = FichajeApp()
+    sys.exit(app.exec())
 
 
 if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    
-    qss_path = os.path.join(os.path.dirname(__file__), "gui", "estilos.qss")
-    if os.path.exists(qss_path):
-        with open(qss_path, "r") as f:
-            app.setStyleSheet(f.read())
-
-    ventana = FichajeApp()
-    ventana.show()
-    sys.exit(app.exec())
+    main()
