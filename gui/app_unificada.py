@@ -8,467 +8,484 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import QDate, QTime, Signal, Qt, QTimer
 from PySide6.QtGui import QColor, QFont
-from datetime import datetime, timedelta
+# CORREGIDO: Se importan explícitamente date y time para resolver errores de tipado de Pylance
+from datetime import datetime, timedelta, date, time 
+from typing import List, Tuple, Dict, Any, Optional
 
+# Model Imports - CORREGIDO: Nombres de funciones en inglés
 from models.fichaje import (
-    registrar_fichaje, obtener_fichajes_del_dia, calcular_horas_trabajadas, 
-    registrar_fichaje_manual, TIPOS_FICHAJE
+    register_punch, get_daily_punches, calculate_worked_hours, 
+    register_manual_punch, delete_punch_by_date_type, PUNCH_TYPES
 )
+from models.logica_contador import calculate_accumulated_time_and_state 
+
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
+from db import connect_db # CORREGIDO: conectar -> connect_db
 
-# Clase base para la señal
+# Base class for signal emission - CORREGIDO: Nombre de señal
 class SignalEmitter(QWidget):
-    fichajes_cambiados = Signal()  
+    """Base class to centralize the signal for punch changes across widgets."""
+    punches_changed = Signal()  
 
-class AppUnificada(SignalEmitter):
-    OBJETIVO_SEMANAL = 37.5 
+# CORREGIDO: Nombre de clase
+class UnifiedPunchApp(SignalEmitter):
+    """
+    Main widget combining punch control, weekly table, summary, and chart.
+    Manages the application state and UI updates.
+    """
+    WEEKLY_GOAL_HOURS: float = 37.5 
 
     def __init__(self):
         super().__init__()
         
-        # Inicialización del contador
-        self.tiempo_trabajado_segundos = 0
-        self.ultimo_fichaje_hora = None
+        # State Initialization - CORREGIDO: Nombres de atributos
+        self.worked_time_seconds: float = 0.0
+        self.last_punch_time: Optional[datetime] = None
+        
+        # Timer Configuration (1-second interval)
         self.timer = QTimer(self)
-        self.timer.timeout.connect(self._actualizar_contador)
+        self.timer.timeout.connect(self._update_counter)
         
-        self.layout_principal = QVBoxLayout(self)
+        self.main_layout = QVBoxLayout(self)
 
-        # 1. Sección de Fichaje y Resumen Diario (Tarjetas)
-        self._crear_seccion_fichaje_rapido()
-        self.layout_principal.addLayout(self.fichaje_rapido_layout)
-        self.layout_principal.addItem(QSpacerItem(20, 10, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)) 
+        # 1. UI Construction - CORREGIDO: Nombres de métodos
+        self._create_quick_punch_section()
+        self.main_layout.addLayout(self.quick_punch_layout)
+        self.main_layout.addItem(QSpacerItem(20, 10, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)) 
         
-        # 2. Sección de Resumen Semanal (Barra de progreso)
-        self._crear_seccion_resumen_semanal()
-        self.layout_principal.addLayout(self.resumen_semanal_layout)
-        self.layout_principal.addItem(QSpacerItem(20, 10, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)) 
+        self._create_weekly_summary_section()
+        self.main_layout.addLayout(self.weekly_summary_layout)
+        self.main_layout.addItem(QSpacerItem(20, 10, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)) 
 
-        # 3. Historial y Edición Manual
-        self._crear_seccion_historial()
-        self.layout_principal.addWidget(self.historial_group)
+        self._create_history_section()
+        self.main_layout.addWidget(self.history_group)
         
-        # 4. Gráfico
-        self._crear_seccion_grafico()
-        self.layout_principal.addWidget(self.canvas)
+        self._create_chart_section()
+        self.main_layout.addWidget(self.canvas)
 
-        # Inicialización de datos
-        self.actualizar_tabla()
-        self.actualizar_historial_rapido()
-        self.actualizar_estado_botones()
-        self.actualizar_resumen_semanal() 
-        self._inicializar_contador_estado() 
+        # 2. Initial Data Load - CORREGIDO: Nombres de métodos
+        self._load_initial_counter_state() 
+        self.update_table()
+        self.update_quick_history()
+        self.update_button_state()
+        self.update_weekly_summary() 
 
-    def _crear_seccion_fichaje_rapido(self):
-        """Crea los botones y etiquetas de estado con diseño de tarjetas."""
-        self.fichaje_rapido_layout = QGridLayout()
+    # ----------------------------------------
+    # --- UI Creation Methods ---
+    # ----------------------------------------
+
+    def _create_quick_punch_section(self):
+        """Creates the quick punch buttons and daily status cards."""
+        self.quick_punch_layout = QGridLayout()
         
-        # A) Tarjeta de Info del Día (Horas Trabajadas Hoy)
+        # A) Daily Info Card (Worked Hours)
         info_frame = QFrame()
         info_frame.setObjectName("InfoCard")
         info_layout = QVBoxLayout(info_frame)
         info_layout.setAlignment(Qt.AlignmentFlag.AlignCenter) 
         
-        self.label_fecha = QLabel(f"Hoy: {QDate.currentDate().toString('yyyy-MM-dd')}")
-        self.label_fecha.setObjectName("LabelFecha")
-        self.label_fecha.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.label_fecha.setStyleSheet("font-weight: bold; margin-bottom: 5px; font-size: 14pt;")
+        self.date_label = QLabel(f"Today: {QDate.currentDate().toString('yyyy-MM-dd')}")
+        self.date_label.setObjectName("LabelDate")
         
-        self.label_horas_title = QLabel("Horas trabajadas hoy:")
-        self.label_horas_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.label_horas_title.setStyleSheet("font-size: 12pt; margin-top: 5px;")
-        self.label_horas = QLabel("0.00 h")
-        self.label_horas.setObjectName("LabelHoras") 
-        self.label_horas.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.hours_title_label = QLabel("Hours worked today:")
+        self.hours_label = QLabel("0.00 h")
+        self.hours_label.setObjectName("LabelHours") 
         
-        info_layout.addWidget(self.label_fecha)
-        info_layout.addWidget(self.label_horas_title)
-        info_layout.addWidget(self.label_horas)
+        info_layout.addWidget(self.date_label, alignment=Qt.AlignmentFlag.AlignCenter)
+        info_layout.addWidget(self.hours_title_label, alignment=Qt.AlignmentFlag.AlignCenter)
+        info_layout.addWidget(self.hours_label, alignment=Qt.AlignmentFlag.AlignCenter)
         
-        self.fichaje_rapido_layout.addWidget(info_frame, 0, 0, 1, 1) 
+        self.quick_punch_layout.addWidget(info_frame, 0, 0, 1, 1) 
         
-        # B) Botones de Fichaje 
-        botones_frame = QFrame()
-        botones_frame.setObjectName("InfoCard")
-        botones_layout = QVBoxLayout(botones_frame)
-        botones_layout.setContentsMargins(5, 5, 5, 5) 
+        # B) Punch Buttons Card
+        buttons_frame = QFrame()
+        buttons_frame.setObjectName("InfoCard")
+        buttons_layout = QVBoxLayout(buttons_frame)
         
-        self.botones = {}
-        boton_names = {
-            "Entrada": "EntradaBtn",
-            "Ir a comer": "IrAComerBtn",
-            "Salida comida": "SalidaComidaBtn",
-            "Fin jornada": "FinJornadaBtn"
-        }
+        self.punch_buttons: Dict[str, QPushButton] = {}
+        for punch_type in PUNCH_TYPES: 
+            btn = QPushButton(punch_type)
+            # CORREGIDO: Llamada al método renombrado
+            btn.clicked.connect(lambda checked, t=punch_type: self._execute_punch(t))
+            # Set object name for QSS styling
+            btn.setObjectName(f"{punch_type.replace(' ', '')}Btn") 
+            self.punch_buttons[punch_type] = btn
+            buttons_layout.addWidget(btn)
         
-        for tipo in TIPOS_FICHAJE: 
-            btn = QPushButton(tipo)
-            btn.setObjectName(boton_names.get(tipo, "GenericBtn")) 
-            btn.clicked.connect(lambda checked, t=tipo: self.fichar(t))
-            self.botones[tipo] = btn
-            botones_layout.addWidget(btn)
+        self.quick_punch_layout.addWidget(buttons_frame, 0, 1, 1, 1)
         
-        self.fichaje_rapido_layout.addWidget(botones_frame, 0, 1, 1, 1)
+        # C) Daily History Card 
+        history_frame = QFrame()
+        history_frame.setObjectName("InfoCard")
+        history_layout = QVBoxLayout(history_frame)
         
-        # C) Tarjeta de Historial del Día 
-        historial_frame = QFrame()
-        historial_frame.setObjectName("InfoCard")
-        historial_layout = QVBoxLayout(historial_frame)
+        self.history_title_label = QLabel("Today's Punches:")
+        self.history_title_label.setObjectName("LabelHistoryTitle")
         
-        self.label_historial_title = QLabel("Fichajes del día:")
-        self.label_historial_title.setStyleSheet("font-weight: bold; margin-bottom: 5px; font-size: 12pt;")
+        self.history_content_label = QLabel("No punches yet.")
+        self.history_content_label.setObjectName("LabelHistoryContent") 
         
-        self.label_historial_content = QLabel("No hay fichajes todavía.")
-        self.label_historial_content.setObjectName("LabelHistorialContent") 
+        history_layout.addWidget(self.history_title_label)
+        history_layout.addWidget(self.history_content_label)
         
-        historial_layout.addWidget(self.label_historial_title)
-        historial_layout.addWidget(self.label_historial_content)
+        self.quick_punch_layout.addWidget(history_frame, 0, 2, 1, 1)
         
-        self.fichaje_rapido_layout.addWidget(historial_frame, 0, 2, 1, 1)
-        
-        self.fichaje_rapido_layout.setColumnStretch(0, 3) 
-        self.fichaje_rapido_layout.setColumnStretch(1, 2) 
-        self.fichaje_rapido_layout.setColumnStretch(2, 5) 
+        # Column stretch configuration
+        self.quick_punch_layout.setColumnStretch(0, 3) 
+        self.quick_punch_layout.setColumnStretch(1, 2) 
+        self.quick_punch_layout.setColumnStretch(2, 5) 
 
 
-    def _crear_seccion_resumen_semanal(self):
-        """Crea la barra de progreso semanal."""
-        self.resumen_semanal_layout = QVBoxLayout()
+    def _create_weekly_summary_section(self):
+        """Creates the weekly progress bar."""
+        self.weekly_summary_layout = QVBoxLayout()
         
-        self.label_resumen_semanal = QLabel("")
-        self.label_resumen_semanal.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.label_resumen_semanal.setStyleSheet("font-size: 12pt; font-weight: bold; color: #ecf0f1; margin-bottom: 5px;")
+        self.weekly_summary_label = QLabel("")
+        self.weekly_summary_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
         self.progress_bar = QProgressBar()
-        self.progress_bar.setRange(0, int(self.OBJETIVO_SEMANAL * 100)) 
+        # Set progress range based on weekly goal in "tenths of an hour" for precision
+        self.progress_bar.setRange(0, int(self.WEEKLY_GOAL_HOURS * 100)) 
         self.progress_bar.setValue(0)
         self.progress_bar.setTextVisible(True)
         
-        self.resumen_semanal_layout.addWidget(self.label_resumen_semanal)
-        self.resumen_semanal_layout.addWidget(self.progress_bar)
+        self.weekly_summary_layout.addWidget(self.weekly_summary_label)
+        self.weekly_summary_layout.addWidget(self.progress_bar)
 
 
-    def _crear_seccion_historial(self):
-        """Crea los controles de fecha y la tabla."""
-        self.historial_group = QGroupBox("Historial y Edición Manual")
+    def _create_history_section(self):
+        """Creates the date controls and the weekly punch table."""
+        self.history_group = QGroupBox("Weekly History and Manual Edit")
         
-        vbox = QVBoxLayout(self.historial_group)
+        vbox = QVBoxLayout(self.history_group)
 
-        # Controles de fecha y botones de acción
+        # Date controls and action buttons
         control_layout = QHBoxLayout()
         
-        label = QLabel("Fecha de la semana:")
+        date_label = QLabel("Week starting:")
         self.date_selector = QDateEdit(QDate.currentDate())
         self.date_selector.setCalendarPopup(True)
-        self.date_selector.dateChanged.connect(self.actualizar_tabla)
+        # CORREGIDO: Llamada al método renombrado
+        self.date_selector.dateChanged.connect(self.update_table)
         
-        self.btn_manual = QPushButton("Entrada manual")
-        self.btn_manual.clicked.connect(self.entrada_manual_dialog)
+        # CORREGIDO: Nombres de botones y llamadas a métodos
+        self.manual_punch_btn = QPushButton("Manual Punch")
+        self.manual_punch_btn.clicked.connect(self._show_manual_punch_dialog)
 
-        self.btn_eliminar = QPushButton("Eliminar fichaje")
-        self.btn_eliminar.clicked.connect(self.eliminar_fichaje)
+        self.delete_punch_btn = QPushButton("Delete Punch")
+        self.delete_punch_btn.clicked.connect(self._delete_selected_punch)
         
-        control_layout.addWidget(label)
+        control_layout.addWidget(date_label)
         control_layout.addWidget(self.date_selector)
         control_layout.addStretch() 
-        control_layout.addWidget(self.btn_manual)
-        control_layout.addWidget(self.btn_eliminar)
+        control_layout.addWidget(self.manual_punch_btn)
+        control_layout.addWidget(self.delete_punch_btn)
         vbox.addLayout(control_layout)
 
-        # Tabla de fichajes 
-        self.tabla = QTableWidget()
-        self.tabla.setColumnCount(2 + len(TIPOS_FICHAJE)) 
-        self.tabla.setHorizontalHeaderLabels(["Día Sem", "Día"] + TIPOS_FICHAJE) 
-        self.tabla.itemChanged.connect(self.editar_fichaje_desde_tabla)
-        self.tabla.setAlternatingRowColors(True)
+        # Punch Table 
+        self.punch_table = QTableWidget()
+        self.punch_table.setColumnCount(2 + len(PUNCH_TYPES)) 
+        self.punch_table.setHorizontalHeaderLabels(["Day", "Date"] + PUNCH_TYPES) 
+        # Connect itemChanged for manual inline editing
+        # CORREGIDO: Llamada al método renombrado
+        self.punch_table.itemChanged.connect(self._edit_punch_from_table)
         
-        # Aumentamos la prioridad de crecimiento vertical de la tabla para darle más espacio
-        self.tabla.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding) 
+        # Configuration for table appearance and sizing
+        self.punch_table.setAlternatingRowColors(True)
+        self.punch_table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding) 
+        self.punch_table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         
-        self.tabla.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        
-        vbox.addWidget(self.tabla)
+        vbox.addWidget(self.punch_table)
         
         
-    def _crear_seccion_grafico(self):
-        """Crea el gráfico de Matplotlib."""
+    def _create_chart_section(self):
+        """Creates the Matplotlib chart canvas."""
         self.figure = Figure(facecolor="#2c3e50") 
         self.canvas = FigureCanvas(self.figure)
         
         self.canvas.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self.canvas.setMinimumHeight(200) # Reducimos la altura mínima para darle más a la tabla
+        self.canvas.setMinimumHeight(200)
 
 
     # ----------------------------------------
-    # --- Lógica del Contador en Tiempo Real ---
+    # --- Real-Time Counter Logic ---
     # ----------------------------------------
 
-    def _inicializar_contador_estado(self):
+    def _load_initial_counter_state(self):
         """
-        Calcula el tiempo trabajado al inicio y define si el contador debe estar activo.
+        Calculates initial worked time using logica_contador and starts/stops the QTimer.
         """
-        hoy = QDate.currentDate().toString("yyyy-MM-dd")
-        fichajes = obtener_fichajes_del_dia(hoy)
+        today_str: str = QDate.currentDate().toString("yyyy-MM-dd")
+        # CORREGIDO: Nombre de función
+        daily_punches: List[Tuple[str, str]] = get_daily_punches(today_str)
         
-        if not fichajes:
-            self.tiempo_trabajado_segundos = 0
-            self.timer.stop()
-            self._actualizar_label_horas(0)
-            return
-
+        # CORREGIDO: Nombre de función
         try:
-            from models.logica_contador import calcular_tiempo_acumulado_y_estado 
+            total_seconds, is_active, start_time_dt = calculate_accumulated_time_and_state(daily_punches)
             
-            total_segundos, esta_activo, ultimo_fichaje_dt = calcular_tiempo_acumulado_y_estado(fichajes)
-            
-            self.tiempo_trabajado_segundos = total_segundos
-            self.ultimo_fichaje_hora = ultimo_fichaje_dt
-            self._actualizar_label_horas(total_segundos)
+            self.worked_time_seconds = total_seconds
+            self.last_punch_time = start_time_dt
+            self._update_hours_label(total_seconds)
 
-            if esta_activo:
+            if is_active:
                 self.timer.start(1000)
             else:
                 self.timer.stop()
                 
-        except ImportError:
-            # Fallback si no se encuentra models.logica_contador
-            horas = calcular_horas_trabajadas(hoy)
-            self.tiempo_trabajado_segundos = int(horas * 3600)
-            self._actualizar_label_horas(self.tiempo_trabajado_segundos)
+        except Exception as e:
+            # Fallback for errors in counter logic or DB read
+            print(f"Error initializing counter state: {e}")
+            # El modelo calculate_worked_hours toma la lista de fichajes y devuelve un timedelta
+            hours_td = calculate_worked_hours(daily_punches)
+            self.worked_time_seconds = hours_td.total_seconds()
+            self._update_hours_label(self.worked_time_seconds)
+            self.timer.stop()
+
+
+    def _update_counter(self):
+        """Timer slot: increments the counter and updates the UI label."""
+        # Se recalcula cada segundo para mantener la precisión y sincronización con el reloj del sistema
+        if self.last_punch_time:
+            punches = get_daily_punches(datetime.now().strftime("%Y-%m-%d"))
+            total_seconds, is_active, start_dt = calculate_accumulated_time_and_state(punches)
+            
+            self.worked_time_seconds = total_seconds
+            self._update_hours_label(self.worked_time_seconds)
+            
+        else:
+            self._update_hours_label(self.worked_time_seconds)
             self.timer.stop()
             
-        except Exception:
-            # Fallback en caso de otro error
-            horas = calcular_horas_trabajadas(hoy)
-            self.tiempo_trabajado_segundos = int(horas * 3600)
-            self._actualizar_label_horas(self.tiempo_trabajado_segundos)
-            self.timer.stop()
+        # Actualizar fecha y hora en el label de fecha
+        self.date_label.setText(datetime.now().strftime("%A, %d %B %Y | %H:%M:%S")) 
 
 
-    def _actualizar_contador(self):
-        """Aumenta el contador cada segundo y actualiza el label."""
-        if self.timer.isActive():
-            self.tiempo_trabajado_segundos += 1
-            self._actualizar_label_horas(self.tiempo_trabajado_segundos)
-
-
-    def _actualizar_label_horas(self, segundos):
-        """Formatea y actualiza el label de horas."""
-        horas_float = segundos / 3600
-        horas_str = f"{horas_float:.2f} h"
-        self.label_horas.setText(horas_str)
+    def _update_hours_label(self, seconds: float):
+        """Formats and updates the daily worked hours label."""
+        total_time = timedelta(seconds=int(seconds))
+        hours_str: str = str(total_time).split('.')[0] # Formato HH:MM:SS
+        self.hours_label.setText(hours_str)
 
 
     # ----------------------------------------
-    # --- Métodos de Lógica Central ---
+    # --- Core Application Logic Methods ---
     # ----------------------------------------
     
-    def fichar(self, tipo):
+    def _execute_punch(self, punch_type: str):
+        """Handles the quick punch button actions."""
         try:
-            registrar_fichaje(tipo)
+            # CORREGIDO: Nombre de función
+            register_punch(punch_type)
             
-            self._inicializar_contador_estado() 
-            self.actualizar_tabla()
-            self.actualizar_historial_rapido()
-            self.actualizar_estado_botones() 
-            self.actualizar_resumen_semanal() 
-            self.fichajes_cambiados.emit() 
+            # Refresh all UI elements - CORREGIDO: Nombres de métodos y señales
+            self._load_initial_counter_state() 
+            self.update_table()
+            self.update_quick_history()
+            self.update_button_state() 
+            self.update_weekly_summary() 
+            self.punches_changed.emit() 
             
         except Exception as e:
-            QMessageBox.critical(self, "Error de Fichaje", str(e))
+            QMessageBox.critical(self, "Punch Error", str(e))
 
-    def actualizar_historial_rapido(self):
-        hoy = QDate.currentDate().toString("yyyy-MM-dd")
-        fichajes = obtener_fichajes_del_dia(hoy)
+    def update_quick_history(self):
+        """Updates the label showing today's punches."""
+        today_str: str = QDate.currentDate().toString("yyyy-MM-dd")
+        # CORREGIDO: Nombre de función
+        punches: List[Tuple[str, str]] = get_daily_punches(today_str)
         
-        if fichajes:
-            texto = "\n".join([f"  • {tipo}: {hora[:5]}" for tipo, hora in fichajes]) 
+        if punches:
+            # Format time to HH:MM for cleaner display
+            text = "\n".join([f"  • {punch_type}: {time_str[:5]}" for punch_type, time_str in punches]) 
         else:
-            texto = "No hay fichajes todavía."
-        self.label_historial_content.setText(texto) 
+            text = "No punches yet."
+        self.history_content_label.setText(text) 
 
-    def actualizar_estado_botones(self):
-        """Controla qué botones de fichaje deben estar habilitados/deshabilitados."""
-        hoy = QDate.currentDate().toString("yyyy-MM-dd")
-        fichajes = [tipo for tipo, _ in obtener_fichajes_del_dia(hoy)]
-        fichados = {f: True for f in fichajes}
+    def update_button_state(self):
+        """Controls which quick punch buttons are enabled/disabled based on flow logic."""
+        today_str: str = QDate.currentDate().toString("yyyy-MM-dd")
+        # CORREGIDO: Nombre de función
+        punches_list: List[str] = [punch_type for punch_type, _ in get_daily_punches(today_str)]
+        punched: Dict[str, bool] = {p: True for p in punches_list}
 
-        # 1. Deshabilitar TODOS los botones primero (aplica el estilo grisáceo)
-        for btn in self.botones.values():
+        # 1. Disable all buttons first
+        for btn in self.punch_buttons.values():
             btn.setEnabled(False)
 
-        # 2. Aplicar la lógica de habilitación
+        # 2. Apply enablement logic based on sequence
         
-        # A. Fichaje de Entrada:
-        if not fichados.get("Entrada"):
-            self.botones["Entrada"].setEnabled(True)
+        # A. Start Shift
+        if not punched.get("Entrada"):
+            self.punch_buttons["Entrada"].setEnabled(True)
             return
 
-        # B. Jornada Finalizada:
-        if fichados.get("Fin jornada"):
-            # Si hay "Fin jornada", todos permanecen DESACTIVADOS.
-            return 
+        # B. Shift Ended
+        if punched.get("Fin jornada"):
+            return # All remain disabled
         
-        # C. Jornada Activa (Tras Entrada y antes de Fin jornada):
+        # C. Active Shift
         
-        # C1. ¿Estamos en Pausa para comer? (Ir a comer SÍ, Salida comida NO)
-        if fichados.get("Ir a comer") and not fichados.get("Salida comida"):
-            # Solo se puede fichar la vuelta de comer
-            self.botones["Salida comida"].setEnabled(True)
+        # C1. Currently on Lunch Break? ('Ir a comer' YES, 'Salida comida' NO)
+        if punched.get("Ir a comer") and not punched.get("Salida comida"):
+            # Only 'Salida comida' is allowed
+            self.punch_buttons["Salida comida"].setEnabled(True)
         
-        # C2. ¿Estamos trabajando? (Ir a comer NO, o Salida comida SÍ)
-        elif (not fichados.get("Ir a comer")) or (fichados.get("Salida comida")):
-            # Se puede salir a comer O terminar la jornada
-            self.botones["Ir a comer"].setEnabled(True)
-            self.botones["Fin jornada"].setEnabled(True)
+        # C2. Currently Working? (No break or break ended)
+        elif (not punched.get("Ir a comer")) or (punched.get("Salida comida")):
+            # 'Ir a comer' OR 'Fin jornada' are allowed
+            self.punch_buttons["Ir a comer"].setEnabled(True)
+            self.punch_buttons["Fin jornada"].setEnabled(True)
             
     
-    # --- Métodos de la Tabla y Edición ---
+    # --- Table and Editing Methods ---
 
-    def actualizar_tabla(self):
-        """
-        Actualiza la tabla con los fichajes de la semana (Lun-Vie), con fuente pequeña para las horas.
-        """
-        qdate = self.date_selector.date()
-        fecha = datetime(qdate.year(), qdate.month(), qdate.day()).date()
-        inicio_semana = fecha - timedelta(days=fecha.weekday()) 
+    def update_table(self):
+        """Updates the table with weekly punches (Mon-Fri) and recalculates totals."""
+        qdate: QDate = self.date_selector.date()
+        date_obj: date = datetime(qdate.year(), qdate.month(), qdate.day()).date()
+        # Calculate the start of the week (Monday)
+        start_of_week: date = date_obj - timedelta(days=date_obj.weekday()) 
         
-        self.tabla.blockSignals(True)
-        self.tabla.setRowCount(5) 
+        self.punch_table.blockSignals(True)
+        self.punch_table.setRowCount(5) 
 
-        self.horas_dia = []
-        
-        dias_semana_nombres = ["Lun", "Mar", "Mié", "Jue", "Vie"]
+        self.daily_hours: List[float] = []
+        day_names: List[str] = ["Mon", "Tue", "Wed", "Thu", "Fri"]
 
-        # Ajuste de tamaño de fuente para que las horas quepan mejor
+        # Font configuration for table data
         font_data = QFont()
-        font_data.setPointSize(14) 
-        
+        font_data.setPointSize(10)
         font_day_name = QFont()
         font_day_name.setBold(True)
 
-        for i in range(5): 
-            dia = inicio_semana + timedelta(days=i)
-            dia_str = dia.strftime("%Y-%m-%d")
-            fichajes = obtener_fichajes_del_dia(dia_str)
-            fich_dict = {tipo: hora for tipo, hora in fichajes}
+        for i in range(5): # Iterate Monday to Friday
+            day: date = start_of_week + timedelta(days=i)
+            day_str: str = day.strftime("%Y-%m-%d")
+            # CORREGIDO: Nombre de función
+            punches: List[Tuple[str, str]] = get_daily_punches(day_str)
+            punch_dict: Dict[str, str] = {punch_type: time_str for punch_type, time_str in punches}
 
-            # Columna 0: Día de la semana
-            item_dia_sem = QTableWidgetItem(dias_semana_nombres[i])
-            item_dia_sem.setTextAlignment(Qt.AlignmentFlag.AlignCenter) 
-            item_dia_sem.setFont(font_day_name) 
-            self.tabla.setItem(i, 0, item_dia_sem)
+            # Column 0: Day of the week
+            item_day_name = QTableWidgetItem(day_names[i])
+            item_day_name.setFont(font_day_name) 
+            self.punch_table.setItem(i, 0, item_day_name)
             
-            # Columna 1: Fecha (Día)
-            item_dia = QTableWidgetItem(dia_str)
-            item_dia.setTextAlignment(Qt.AlignmentFlag.AlignCenter) 
-            self.tabla.setItem(i, 1, item_dia)
+            # Column 1: Date
+            item_date = QTableWidgetItem(day_str)
+            self.punch_table.setItem(i, 1, item_date)
 
-            # Columnas 2 en adelante: Fichajes (Horas)
-            for j, tipo in enumerate(TIPOS_FICHAJE):
-                hora_str = fich_dict.get(tipo, "")
-                if hora_str and len(hora_str) > 5:
-                    hora_str = hora_str[:5]
+            # Columns 2 onwards: Punches (Hours)
+            for j, punch_type in enumerate(PUNCH_TYPES):
+                hour_str: str = punch_dict.get(punch_type, "")
+                if hour_str and len(hour_str) > 5:
+                    hour_str = hour_str[:5] # Use HH:MM format
                     
-                item = QTableWidgetItem(hora_str)
-                item.setForeground(QColor("#ecf0f1"))
-                
+                item = QTableWidgetItem(hour_str)
                 item.setFont(font_data) 
                 
+                # Apply alignment and QSS colors
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter) 
-                
-                self.tabla.setItem(i, j+2, item)
+                self.punch_table.setItem(i, j+2, item)
 
-            horas_trabajo = calcular_horas_trabajadas(dia_str)
-            self.horas_dia.append(horas_trabajo)
+            # CORREGIDO: calculate_worked_hours toma la lista de fichajes y devuelve un float
+            worked_hours_td: timedelta = calculate_worked_hours(punches)
+            worked_hours: float = worked_hours_td.total_seconds() / 3600
+            self.daily_hours.append(worked_hours)
 
-        # Ajuste de cabecera
-        self.tabla.resizeColumnsToContents() 
-        self.tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents) 
-        self.tabla.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents) 
+        # Final table layout adjustments
+        self.punch_table.resizeColumnsToContents() 
+        self.punch_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents) 
+        self.punch_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents) 
         
-        for i in range(2, self.tabla.columnCount()):
-            self.tabla.horizontalHeader().setSectionResizeMode(i, QHeaderView.ResizeMode.Stretch) 
+        for i in range(2, self.punch_table.columnCount()):
+            self.punch_table.horizontalHeader().setSectionResizeMode(i, QHeaderView.ResizeMode.Stretch) 
             
-        self.tabla.blockSignals(False)
-        self.actualizar_grafico()
-        self.actualizar_resumen_semanal() 
+        self.punch_table.blockSignals(False)
+        # CORREGIDO: Nombre de métodos
+        self.update_chart()
+        self.update_weekly_summary() 
         
-    def actualizar_resumen_semanal(self):
-        """Calcula las horas semanales trabajadas y actualiza la barra de progreso."""
-        qdate = self.date_selector.date()
-        fecha = datetime(qdate.year(), qdate.month(), qdate.day()).date()
-        inicio_semana = fecha - timedelta(days=fecha.weekday()) 
+    def update_weekly_summary(self):
+        """Calculates weekly hours and updates the progress bar."""
+        qdate: QDate = self.date_selector.date()
+        date_obj: date = datetime(qdate.year(), qdate.month(), qdate.day()).date()
+        start_of_week: date = date_obj - timedelta(days=date_obj.weekday()) 
         
-        total_horas = 0
+        total_hours: float = 0.0
+        # Recalculate based on current table week selection
         for i in range(5):
-            dia = inicio_semana + timedelta(days=i)
-            dia_str = dia.strftime("%Y-%m-%d")
-            total_horas += calcular_horas_trabajadas(dia_str)
+            day: date = start_of_week + timedelta(days=i)
+            day_str: str = day.strftime("%Y-%m-%d")
+            # CORREGIDO: calculate_worked_hours toma la lista de fichajes
+            punches: List[Tuple[str, str]] = get_daily_punches(day_str)
+            total_hours += calculate_worked_hours(punches).total_seconds() / 3600
             
-        valor_progreso = int(total_horas * 100) 
-        self.progress_bar.setValue(valor_progreso)
+        # Value for progress bar (multiplied by 100 for range set previously)
+        progress_value: int = int(total_hours * 100) 
+        self.progress_bar.setValue(progress_value)
         
-        horas_restantes = max(0, self.OBJETIVO_SEMANAL - total_horas)
-        porcentaje = (total_horas / self.OBJETIVO_SEMANAL) * 100 if self.OBJETIVO_SEMANAL > 0 else 0
+        hours_remaining: float = max(0, self.WEEKLY_GOAL_HOURS - total_hours)
+        percentage: float = (total_hours / self.WEEKLY_GOAL_HOURS) * 100 if self.WEEKLY_GOAL_HOURS > 0 else 0.0
         
-        texto_progreso = f"Progreso: {total_horas:.2f} h de {self.OBJETIVO_SEMANAL:.1f} h ({porcentaje:.0f}%)"
+        progress_text: str = f"Progress: {total_hours:.2f} h of {self.WEEKLY_GOAL_HOURS:.1f} h ({percentage:.0f}%)"
         
-        if horas_restantes > 0 and porcentaje < 100:
-            texto_restante = f"Te quedan {horas_restantes:.2f} horas hasta el objetivo."
-        elif total_horas == 0:
-            texto_restante = f"Debes alcanzar {self.OBJETIVO_SEMANAL:.1f} horas esta semana."
+        # Update summary text
+        if hours_remaining > 0 and percentage < 100:
+            remaining_text: str = f"{hours_remaining:.2f} hours remaining until goal."
+        elif total_hours == 0:
+            remaining_text: str = f"Must reach {self.WEEKLY_GOAL_HOURS:.1f} hours this week."
         else:
-            texto_restante = "¡Objetivo semanal completado! 🎉"
+            remaining_text: str = "Weekly goal completed! 🎉"
             
-        self.progress_bar.setFormat(texto_progreso)
-        self.label_resumen_semanal.setText(texto_restante)
+        self.progress_bar.setFormat(progress_text)
+        self.weekly_summary_label.setText(remaining_text)
 
-    def actualizar_grafico(self):
-        """Genera gráfico semanal estético, solo para los 5 días laborales."""
+    def update_chart(self):
+        """Generates the aesthetic weekly bar chart for the 5 working days."""
         self.figure.clear()
         
+        # Set subplot background color to match QGroupBox/Card background
         ax = self.figure.add_subplot(111, facecolor="#34495e") 
 
-        dias_etiquetas = []
-        for i in range(self.tabla.rowCount()): 
-            item = self.tabla.item(i, 0) 
+        day_labels: List[str] = []
+        for i in range(self.punch_table.rowCount()):
+            item = self.punch_table.item(i, 0)
+            # CORREGIDO: Comprobación explícita para evitar Error 8 de Pylance
             if item:
-                dias_etiquetas.append(item.text()) 
-
-        colores = []
-        objetivo_diario = self.OBJETIVO_SEMANAL / 5 
+                 day_labels.append(item.text())
         
-        for i, h in enumerate(self.horas_dia): 
-            target = objetivo_diario 
-            
-            if target > 0:
-                pct = h / target
+        # Color coding logic for bars based on daily goal
+        daily_goal: float = self.WEEKLY_GOAL_HOURS / 5 
+        colors: List[str] = []
+        for h in self.daily_hours: 
+            if daily_goal > 0:
+                pct: float = h / daily_goal
                 if pct >= 1.0:
-                    colores.append("#2ecc71")
+                    colors.append("#2ecc71") # Green (Goal reached)
                 elif pct >= 0.8:
-                    colores.append("#f1c40f")
+                    colors.append("#f1c40f") # Yellow (Close to goal)
                 else:
-                    colores.append("#e74c3c")
+                    colors.append("#e74c3c") # Red (Below goal)
             else:
-                colores.append("#4e6d8a") 
+                colors.append("#4e6d8a") # Default gray
 
-        ax.bar(dias_etiquetas, self.horas_dia, color=colores, edgecolor="#ecf0f1", linewidth=0.5)
+        ax.bar(day_labels, self.daily_hours, color=colors, edgecolor="#ecf0f1", linewidth=0.5)
 
-        ax.axhline(objetivo_diario, color="#1abc9c", linestyle="-.", alpha=0.9, 
-                   label=f"Obj. diario ({objetivo_diario:.1f} h)")
+        # Add horizontal goal line
+        ax.axhline(daily_goal, color="#1abc9c", linestyle="-.", alpha=0.9, 
+                   label=f"Daily Goal ({daily_goal:.1f} h)")
 
-        total_semanal = sum(self.horas_dia)
-        pct_total = (total_semanal / self.OBJETIVO_SEMANAL) * 100
+        total_weekly: float = sum(self.daily_hours)
+        pct_total: float = (total_weekly / self.WEEKLY_GOAL_HOURS) * 100 if self.WEEKLY_GOAL_HOURS > 0 else 0.0
         
-        title_text = f"Horas trabajadas (Lun-Vie) | Total: {total_semanal:.2f} h ({pct_total:.0f}%)"
+        title_text: str = f"Worked Hours (Mon-Fri) | Total: {total_weekly:.2f} h ({pct_total:.0f}%)"
         ax.set_title(title_text, color="#ecf0f1", fontsize=14, pad=15) 
 
-        ax.set_ylabel("Horas", color="#ecf0f1")
-        ax.set_xlabel("Día", color="#ecf0f1")
+        # Configure axis appearance for dark theme
+        ax.set_ylabel("Hours", color="#ecf0f1")
+        ax.set_xlabel("Day", color="#ecf0f1")
         ax.tick_params(colors="#ecf0f1", labelsize=9)
-        ax.set_facecolor("#34495e") 
         for spine in ax.spines.values():
             spine.set_color("#ecf0f1")
             
@@ -481,28 +498,31 @@ class AppUnificada(SignalEmitter):
         ax.legend(facecolor="#34495e", edgecolor="#ecf0f1", labelcolor="#ecf0f1", fontsize=9)
         self.canvas.draw()
         
-    def entrada_manual_dialog(self):
+    def _show_manual_punch_dialog(self):
+        """Displays the dialog for manual punch entry/update."""
         dialog = QDialog(self)
-        dialog.setWindowTitle("Entrada manual")
+        dialog.setWindowTitle("Manual Punch Entry")
         layout = QFormLayout(dialog)
 
-        combo_dia = QComboBox()
-        for i in range(self.tabla.rowCount()): 
-            item_fecha = self.tabla.item(i, 1)
-            if item_fecha:
-                combo_dia.addItem(item_fecha.text())
-        layout.addRow("Día:", combo_dia)
+        # 1. Day selection (based on the current week displayed in the table)
+        day_combo = QComboBox()
+        for i in range(self.punch_table.rowCount()): 
+            item_date = self.punch_table.item(i, 1)
+            if item_date:
+                day_combo.addItem(item_date.text())
+        layout.addRow("Date:", day_combo)
 
-        combo_tipo = QComboBox()
-        for tipo in TIPOS_FICHAJE:
-            combo_tipo.addItem(tipo)
-        layout.addRow("Tipo de fichaje:", combo_tipo)
+        # 2. Punch type selection
+        type_combo = QComboBox()
+        for punch_type in PUNCH_TYPES:
+            type_combo.addItem(punch_type)
+        layout.addRow("Punch Type:", type_combo)
 
+        # 3. Time selection (HH:MM)
         time_edit = QTimeEdit()
         time_edit.setDisplayFormat("HH:mm")
-        hora_actual = QTime.currentTime()
-        time_edit.setTime(QTime(hora_actual.hour(), hora_actual.minute()))
-        layout.addRow("Hora:", time_edit)
+        time_edit.setTime(QTime.currentTime())
+        layout.addRow("Time:", time_edit)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(dialog.accept)
@@ -510,90 +530,108 @@ class AppUnificada(SignalEmitter):
         layout.addWidget(buttons)
 
         if dialog.exec():
-            dia_seleccionado = combo_dia.currentText()
-            tipo_seleccionado = combo_tipo.currentText()
-            hora_seleccionada = time_edit.time().toString("HH:mm")
-            self.guardar_fichaje_manual(dia_seleccionado, tipo_seleccionado, hora_seleccionada)
+            selected_date: str = day_combo.currentText()
+            selected_type: str = type_combo.currentText()
+            selected_time: str = time_edit.time().toString("HH:mm")
+            # CORREGIDO: Nombre de método
+            self._save_manual_punch(selected_date, selected_type, selected_time)
 
-    def guardar_fichaje_manual(self, fecha, tipo, hora):
+    def _save_manual_punch(self, date_str: str, punch_type: str, time_str_hhmm: str):
+        """Registers a manual punch and refreshes the UI."""
         try:
-            registrar_fichaje_manual(fecha, tipo, hora)
-            self.actualizar_tabla()
-            self.actualizar_historial_rapido() 
-            self._inicializar_contador_estado()
-            self.actualizar_resumen_semanal()
-            self.actualizar_estado_botones() 
-            self.fichajes_cambiados.emit()
+            # CORREGIDO: Nombre de función
+            register_manual_punch(date_str, punch_type, time_str_hhmm)
+            
+            # Full UI refresh after successful DB operation - CORREGIDO: Nombres de métodos y señales
+            self.update_table()
+            self.update_quick_history() 
+            self._load_initial_counter_state()
+            self.update_weekly_summary()
+            self.update_button_state() 
+            self.punches_changed.emit()
         except Exception as e:
-            QMessageBox.warning(self, "Error de Fichaje Manual", str(e))
+            QMessageBox.warning(self, "Manual Punch Error", str(e))
             return
 
-    def editar_fichaje_desde_tabla(self, item):
+    def _edit_punch_from_table(self, item: QTableWidgetItem):
+        """Handles manual inline editing in the table cells."""
+        # Only process changes in punch columns (index >= 2)
         if item is None or item.column() < 2: 
             return 
             
-        self.tabla.blockSignals(True) 
+        self.punch_table.blockSignals(True) # Prevent recursion
         
-        item_fecha = self.tabla.item(item.row(), 1) 
-        if item_fecha is None:
-            self.tabla.blockSignals(False)
+        item_date: Optional[QTableWidgetItem] = self.punch_table.item(item.row(), 1) 
+        if item_date is None:
+            self.punch_table.blockSignals(False)
             return
             
-        fecha = item_fecha.text()
-        tipo = TIPOS_FICHAJE[item.column()-2] 
-        hora = item.text().strip() or "" 
+        date_str: str = item_date.text()
+        # Map column index to punch type
+        punch_type: str = PUNCH_TYPES[item.column() - 2] 
+        hour_str: str = item.text().strip() 
 
-        if not hora:
-             self.eliminar_fichaje_logico(fecha, tipo)
+        if not hour_str:
+             # If the user deletes the text, perform a logical deletion
+             # CORREGIDO: Nombre de método
+             self._delete_punch_logical(date_str, punch_type)
         else:
             try:
-                datetime.strptime(hora, "%H:%M") 
-                registrar_fichaje_manual(fecha, tipo, hora)
-                self.actualizar_tabla()
-                self.actualizar_historial_rapido()
-                self._inicializar_contador_estado()
-                self.actualizar_resumen_semanal()
-                self.actualizar_estado_botones() 
-                self.fichajes_cambiados.emit()
+                # Validate HH:MM format
+                datetime.strptime(hour_str, "%H:%M") 
+                # CORREGIDO: Nombre de función
+                register_manual_punch(date_str, punch_type, hour_str)
+                
+                # Full UI refresh after successful DB operation - CORREGIDO: Nombres de métodos y señales
+                self.update_table() 
+                self.update_quick_history()
+                self._load_initial_counter_state()
+                self.update_weekly_summary()
+                self.update_button_state() 
+                self.punches_changed.emit()
+                
             except ValueError:
-                QMessageBox.warning(self, "Formato Inválido", "La hora debe tener el formato HH:MM.")
-                self.actualizar_tabla() 
+                QMessageBox.warning(self, "Invalid Format", "Time must be in HH:MM format.")
+                self.update_table() # Revert table content on error
             except Exception as e:
-                QMessageBox.warning(self, "Error de Actualización", str(e))
-                self.actualizar_tabla()
+                QMessageBox.warning(self, "Update Error", str(e))
+                self.update_table() # Revert table content on error
 
-        self.tabla.blockSignals(False)
+        self.punch_table.blockSignals(False)
 
-    def eliminar_fichaje_logico(self, fecha, tipo):
-        from db import conectar 
+    def _delete_punch_logical(self, date_str: str, punch_type: str):
+        """Executes the DB deletion and refreshes UI components."""
         try:
-            with conectar() as conn:
-                cursor = conn.cursor()
-                cursor.execute("DELETE FROM fichajes WHERE fecha=? AND tipo=?", (fecha, tipo))
-                conn.commit()
-            self.actualizar_tabla()
-            self.actualizar_historial_rapido()
-            self._inicializar_contador_estado()
-            self.actualizar_resumen_semanal()
-            self.actualizar_estado_botones() 
-            self.fichajes_cambiados.emit()
+            # CORREGIDO: Usa la función del modelo delete_punch_by_date_type
+            delete_punch_by_date_type(date_str, punch_type)
+            
+            # Full UI refresh after successful DB operation - CORREGIDO: Nombres de métodos y señales
+            self.update_table()
+            self.update_quick_history()
+            self._load_initial_counter_state()
+            self.update_weekly_summary()
+            self.update_button_state() 
+            self.punches_changed.emit()
         except Exception as e:
-            QMessageBox.critical(self, "Error de DB", f"No se pudo eliminar el fichaje: {e}")
+            QMessageBox.critical(self, "DB Error", f"Could not delete punch: {e}")
 
-    def eliminar_fichaje(self):
-        item = self.tabla.currentItem()
+    def _delete_selected_punch(self):
+        """Handles the 'Delete Punch' button action based on cell selection."""
+        item: Optional[QTableWidgetItem] = self.punch_table.currentItem()
+        # Check if an item is selected and it's a punch column (index >= 2) with content
         if not item or item.column() < 2 or not item.text(): 
-            QMessageBox.warning(self, "Eliminar fichaje", "Selecciona una hora válida para eliminar.")
+            QMessageBox.warning(self, "Delete Punch", "Select a valid time cell to delete.")
             return
             
-        item_fecha = self.tabla.item(item.row(), 1) 
-        if not item_fecha:
+        item_date: Optional[QTableWidgetItem] = self.punch_table.item(item.row(), 1) 
+        if not item_date:
             return
             
-        fecha = item_fecha.text()
-        tipo = TIPOS_FICHAJE[item.column()-2] 
+        date_str: str = item_date.text()
+        punch_type: str = PUNCH_TYPES[item.column() - 2] 
 
-        reply = QMessageBox.question(self, "Confirmar eliminación", f"¿Eliminar {tipo} del {fecha}?",
+        reply = QMessageBox.question(self, "Confirm Deletion", f"Confirm deletion of {punch_type} on {date_str}?",
                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         if reply == QMessageBox.StandardButton.Yes:
-            self.eliminar_fichaje_logico(fecha, tipo)
+            # CORREGIDO: Nombre de método
+            self._delete_punch_logical(date_str, punch_type)
